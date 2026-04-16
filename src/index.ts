@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawn } from "node:child_process";
 import { Command } from "commander";
 import {
   CONFIG_PATH,
@@ -26,9 +27,20 @@ program
 
 program
   .command("config")
-  .description("Print the config file path")
-  .action(() => {
-    console.log(CONFIG_PATH);
+  .description("Open ~/.dormlab/config.toml in $EDITOR (default: nano)")
+  .option("-p, --path", "print the config path instead of opening an editor")
+  .action(async (opts: { path?: boolean }) => {
+    ensureConfig();
+    if (opts.path) {
+      console.log(CONFIG_PATH);
+      return;
+    }
+    const editor = process.env.EDITOR || process.env.VISUAL || "nano";
+    const code: number = await new Promise((resolve) => {
+      const child = spawn(editor, [CONFIG_PATH], { stdio: "inherit" });
+      child.on("exit", (c) => resolve(c ?? 0));
+    });
+    process.exit(code);
   });
 
 program
@@ -62,7 +74,7 @@ program
     const pad = Math.max(...entries.map((h) => h.name.length));
     await Promise.all(
       entries.map(async (h) => {
-        const r = sshCapture(h, "true", 6000);
+        const r = await sshCapture(h, "true", 6000);
         const ok = r.code === 0;
         const status = ok ? "ok" : `fail (${r.code})`;
         const line = `${h.name.padEnd(pad)}  ${h.host}  ${status}`;
@@ -114,7 +126,7 @@ program
     let anyFail = false;
     for (const h of hosts) {
       console.log(`\n━━━ ${h.name} (${h.host}) ━━━`);
-      const r = sshCapture(h, remote, 30_000);
+      const r = await sshCapture(h, remote, 30_000);
       if (r.stdout) process.stdout.write(r.stdout);
       if (r.stderr) process.stderr.write(r.stderr);
       if (r.code !== 0) {

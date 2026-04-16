@@ -50,7 +50,7 @@ const App: React.FC = () => {
       await Promise.all(
         Object.values(cfg.hosts).map(async (h) => {
           const t0 = Date.now();
-          const res = sshCapture(h, "true", 5000);
+          const res = await sshCapture(h, "true", 5000);
           const dt = Date.now() - t0;
           if (cancelled) return;
           setRows((prev) =>
@@ -158,9 +158,10 @@ const App: React.FC = () => {
               setCmdInput("");
               setScreen({ kind: "command", host });
             } else if (item.value === "ping") {
-              const res = sshCapture(host, "uptime", 8000);
-              setRunOutput(res.stdout || res.stderr || `exit ${res.code}`);
+              setRunOutput("…");
               setScreen({ kind: "running", host, cmd: "uptime" });
+              const res = await sshCapture(host, "uptime", 8000);
+              setRunOutput(res.stdout || res.stderr || `exit ${res.code}`);
             }
           }}
         />

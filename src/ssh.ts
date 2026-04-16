@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+// spawnSync is kept for the one-shot `which sshpass` check below.
 import type { HostConfig } from "./config.js";
 
 function buildSshArgs(host: HostConfig, extra: string[] = []): string[] {
@@ -19,7 +20,10 @@ function buildSshArgs(host: HostConfig, extra: string[] = []): string[] {
     args.push("-p", String(host.port));
   }
   if (host.identityFile) {
-    args.push("-i", host.identityFile, "-o", "IdentitiesOnly=yes");
+    // Use the configured key, but DON'T set IdentitiesOnly=yes — that would
+    // block ssh-agent and break passphrase-protected keys whose decrypted
+    // copy lives in the agent.
+    args.push("-i", host.identityFile);
   }
   args.push(`${host.user}@${host.host}`);
   args.push(...extra);
@@ -61,21 +65,49 @@ export function sshRun(host: HostConfig, command: string): Promise<number> {
   });
 }
 
-/** Runs a remote command and captures stdout/stderr. Used for status checks. */
+export interface CaptureResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Runs a remote command and captures stdout/stderr without blocking the event
+ * loop. Ink/React rendering stays responsive while this is in flight.
+ */
 export function sshCapture(
   host: HostConfig,
   command: string,
   timeoutMs = 8000,
-): { code: number; stdout: string; stderr: string } {
+): Promise<CaptureResult> {
   const rawArgs = buildSshArgs(host, [command]);
   const { bin, args } = wrapWithSshpass(host, "ssh", rawArgs);
-  const res = spawnSync(bin, args, {
-    encoding: "utf8",
-    timeout: timeoutMs,
+  return new Promise((resolve) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const done = (code: number) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, stdout, stderr });
+    };
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", () => done(-1));
+    child.on("exit", (code) => done(code ?? -1));
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      done(-1);
+    }, timeoutMs);
+    // Don't keep the event loop alive on the timer alone.
+    timer.unref?.();
   });
-  return {
-    code: res.status ?? -1,
-    stdout: res.stdout ?? "",
-    stderr: res.stderr ?? "",
-  };
 }
