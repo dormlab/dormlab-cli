@@ -44,5 +44,46 @@ Per-host keys/users override the defaults. Optional `password = "…"` works if
 
 ## Claude Code skill
 
-`skill/SKILL.md` teaches Claude how to drive the CLI. After `./install.sh`, ask
-Claude things like "is lexie up?" or "run `uptime` on amelia".
+`skills/SKILL.md` teaches Claude how to drive this CLI. Two ways to install it:
+
+**Bundled (recommended if you cloned this repo):** `./install.sh` symlinks the
+skill into `~/.claude/skills/dormlab-cli` for you.
+
+**Standalone (no clone needed):**
+
+```sh
+npx skills add https://github.com/dormlab/dormlab-cli
+```
+
+After either, restart Claude Code (or reload skills) and ask things like
+"is lexie up?", "run `uptime` on amelia", or "ssh me into lexie".
+
+## Long-lasting ssh-add (macOS)
+
+`dormlab` runs `ssh` with stdin closed, so a passphrase-protected key that
+isn't already in `ssh-agent` will hang the connection until the 6-second
+timeout — `dormlab ping` returns `fail` with no obvious reason. Loading the
+key into the agent fixes it for the current session:
+
+```sh
+ssh-add ~/.ssh/id_ed25519
+```
+
+But that's lost on reboot. To make it persistent on macOS, store the
+passphrase in Keychain and have ssh load it automatically on first use:
+
+```sh
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519
+```
+
+Then add this block to `~/.ssh/config` (or your existing `Host *` block):
+
+```
+Host *
+  UseKeychain yes
+  AddKeysToAgent yes
+  IdentityFile ~/.ssh/id_ed25519
+```
+
+After that, `dormlab` works from a cold boot without you ever typing the
+passphrase again.
